@@ -53,13 +53,20 @@ GitHub Actions 배포:
 
 다른 프로젝트에서 사용:
 
+먼저 로컬 환경에 GitHub Packages 읽기용 토큰을 설정합니다. GitHub 문서 기준으로 로컬 설치에는 보통 `PAT classic`의 `read:packages` 권한이 필요합니다.
+
+```bash
+export GPR_USER=YOUR_GITHUB_USERNAME
+export GPR_TOKEN=YOUR_GITHUB_CLASSIC_PAT
+```
+
 ```groovy
 repositories {
     maven {
         url = uri("https://maven.pkg.github.com/whitenight209/crypto-kit")
         credentials {
-            username = System.getenv("GITHUB_ACTOR")
-            password = System.getenv("GITHUB_TOKEN")
+            username = System.getenv("GPR_USER")
+            password = System.getenv("GPR_TOKEN")
         }
     }
     mavenCentral()
@@ -68,6 +75,25 @@ repositories {
 dependencies {
     implementation 'com.chpark.crypto:crypto-kit:1.0.0'
 }
+```
+
+Maven CLI 예시:
+
+```xml
+<repositories>
+  <repository>
+    <id>github</id>
+    <url>https://maven.pkg.github.com/whitenight209/crypto-kit</url>
+  </repository>
+</repositories>
+```
+
+```xml
+<dependency>
+  <groupId>com.chpark.crypto</groupId>
+  <artifactId>crypto-kit</artifactId>
+  <version>1.0.0</version>
+</dependency>
 ```
 
 ## 의존성 추가
@@ -81,7 +107,6 @@ dependencies {
 ```groovy
 // build.gradle
 implementation files('/path/to/crypto-kit/build/libs/crypto-kit-1.0.0.jar')
-implementation 'org.bouncycastle:bcprov-jdk18on:1.78.1'
 ```
 
 ---
@@ -178,7 +203,7 @@ CryptoEngine engine = new CryptoEngine(config);
 | GCM 인증 태그 | 128 bits — 복호화 시 태그 불일치 시 `CryptoException` |
 | 스레드 안전성 | `ThreadLocal<GCMBlockCipher>`로 인스턴스 공유 없이 처리 |
 | 키 메모리 정리 | 사용 후 `Arrays.fill(key, 0)` |
-| 구현체 | Bouncy Castle (`bcprov-jdk18on`) |
+| 구현체 | Java 17 표준 JCE (`AES/GCM/NoPadding`, `PBKDF2WithHmacSHA256`) |
 
 ---
 

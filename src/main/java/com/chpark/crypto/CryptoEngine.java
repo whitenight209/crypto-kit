@@ -1,19 +1,17 @@
 package com.chpark.crypto;
 
-import org.bouncycastle.crypto.InvalidCipherTextException;
-import org.bouncycastle.crypto.engines.AESEngine;
-import org.bouncycastle.crypto.modes.GCMBlockCipher;
-import org.bouncycastle.crypto.params.AEADParameters;
-import org.bouncycastle.crypto.params.KeyParameter;
-import org.bouncycastle.jce.provider.BouncyCastleProvider;
-
+import javax.crypto.AEADBadTagException;
+import javax.crypto.Cipher;
+import javax.crypto.NoSuchPaddingException;
 import javax.crypto.SecretKeyFactory;
+import javax.crypto.spec.GCMParameterSpec;
 import javax.crypto.spec.PBEKeySpec;
+import javax.crypto.spec.SecretKeySpec;
 import java.security.NoSuchAlgorithmException;
-import java.security.NoSuchProviderException;
 import java.security.SecureRandom;
-import java.security.Security;
 import java.security.spec.InvalidKeySpecException;
+import java.security.InvalidAlgorithmParameterException;
+import java.security.InvalidKeyException;
 import java.util.Arrays;
 
 /**
@@ -39,21 +37,15 @@ import java.util.Arrays;
  */
 public class CryptoEngine {
 
+    private static final String AES_GCM_ALGORITHM = "AES/GCM/NoPadding";
     private static final String PBKDF2_ALGORITHM = "PBKDF2WithHmacSHA256";
-    private static final String BC_PROVIDER = "BC";
 
     private final CryptoConfig config;
     private final SecureRandom random = new SecureRandom();
 
-    /** One GCMBlockCipher instance per thread — re-initialised before every use. */
-    private static final ThreadLocal<GCMBlockCipher> CIPHER_LOCAL =
-            ThreadLocal.withInitial(() -> new GCMBlockCipher(new AESEngine()));
-
-    static {
-        if (Security.getProvider(BC_PROVIDER) == null) {
-            Security.addProvider(new BouncyCastleProvider());
-        }
-    }
+    /** One Cipher instance per thread — re-initialised before every use. */
+    private static final ThreadLocal<Cipher> CIPHER_LOCAL =
+            ThreadLocal.withInitial(CryptoEngine::createCipher);
 
     public CryptoEngine() {
         this(CryptoConfig.DEFAULT);
@@ -86,11 +78,11 @@ public class CryptoEngine {
                     config.iterationCount(),
                     config.keyLength()
             );
-            SecretKeyFactory factory = SecretKeyFactory.getInstance(PBKDF2_ALGORITHM, BC_PROVIDER);
+            SecretKeyFactory factory = SecretKeyFactory.getInstance(PBKDF2_ALGORITHM);
             byte[] key = factory.generateSecret(spec).getEncoded();
             spec.clearPassword();
             return key;
-        } catch (NoSuchAlgorithmException | NoSuchProviderException | InvalidKeySpecException e) {
+        } catch (NoSuchAlgorithmException | InvalidKeySpecException e) {
             throw new CryptoException("Key derivation failed", e);
         }
     }
@@ -215,35 +207,45 @@ public class CryptoEngine {
     // -------------------------------------------------------------------------
 
     private byte[] gcmEncrypt(byte[] key, byte[] nonce, byte[] plaintext) throws CryptoException {
-        GCMBlockCipher cipher = CIPHER_LOCAL.get();
-        cipher.init(true, new AEADParameters(new KeyParameter(key), config.tagLength(), nonce));
-        byte[] output = new byte[cipher.getOutputSize(plaintext.length)];
-        int pos = cipher.processBytes(plaintext, 0, plaintext.length, output, 0);
         try {
-            cipher.doFinal(output, pos);
-        } catch (InvalidCipherTextException e) {
+            Cipher cipher = CIPHER_LOCAL.get();
+            cipher.init(Cipher.ENCRYPT_MODE, new SecretKeySpec(key, "AES"),
+                    new GCMParameterSpec(config.tagLength(), nonce));
+            return cipher.doFinal(plaintext);
+        } catch (InvalidKeyException | InvalidAlgorithmParameterException e) {
+            throw new CryptoException("Encryption failed: invalid AES key or GCM parameters", e);
+        } catch (Exception e) {
             throw new CryptoException("Encryption failed", e);
         }
-        return output;
     }
 
     private byte[] gcmDecrypt(byte[] key, byte[] nonce, byte[] ciphertextAndTag)
             throws CryptoException {
-        GCMBlockCipher cipher = CIPHER_LOCAL.get();
-        cipher.init(false, new AEADParameters(new KeyParameter(key), config.tagLength(), nonce));
-        byte[] output = new byte[cipher.getOutputSize(ciphertextAndTag.length)];
-        int pos = cipher.processBytes(ciphertextAndTag, 0, ciphertextAndTag.length, output, 0);
         try {
-            cipher.doFinal(output, pos);
-        } catch (InvalidCipherTextException e) {
+            Cipher cipher = CIPHER_LOCAL.get();
+            cipher.init(Cipher.DECRYPT_MODE, new SecretKeySpec(key, "AES"),
+                    new GCMParameterSpec(config.tagLength(), nonce));
+            return cipher.doFinal(ciphertextAndTag);
+        } catch (AEADBadTagException e) {
             throw new CryptoException("Decryption failed: authentication tag mismatch", e);
+        } catch (InvalidKeyException | InvalidAlgorithmParameterException e) {
+            throw new CryptoException("Decryption failed: invalid AES key or GCM parameters", e);
+        } catch (Exception e) {
+            throw new CryptoException("Decryption failed", e);
         }
-        return output;
     }
 
     private byte[] generateRandom(int length) {
         byte[] bytes = new byte[length];
         random.nextBytes(bytes);
         return bytes;
+    }
+
+    private static Cipher createCipher() {
+        try {
+            return Cipher.getInstance(AES_GCM_ALGORITHM);
+        } catch (NoSuchAlgorithmException | NoSuchPaddingException e) {
+            throw new IllegalStateException("AES/GCM/NoPadding is not available", e);
+        }
     }
 }
