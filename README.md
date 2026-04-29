@@ -14,6 +14,62 @@ PBKDF2 키 유도와 AES-256-GCM 암호화를 제공하는 스레드 안전 Java
 ./gradlew build
 ```
 
+## GitHub Packages 배포
+
+이 프로젝트는 GitHub Packages Maven registry로 배포할 수 있도록 설정되어 있습니다.
+
+필요한 인증 정보:
+
+```bash
+export GITHUB_ACTOR=YOUR_GITHUB_USERNAME
+export GITHUB_TOKEN=YOUR_GITHUB_PACKAGES_TOKEN
+```
+
+선택적으로 저장소 정보도 덮어쓸 수 있습니다. 보통 GitHub Actions에서는 현재 저장소 기준으로 자동 처리되므로 로컬에서 다른 owner/repo로 배포할 때만 필요합니다.
+
+```bash
+export GITHUB_OWNER=whitenight209
+export GITHUB_REPOSITORY_NAME=crypto-kit
+```
+
+배포:
+
+```bash
+./gradlew publish
+```
+
+`publish`는 `mavenLocal()`과 GitHub Packages 둘 다 대상으로 동작합니다. GitHub Packages만 보낼 때는:
+
+```bash
+./gradlew publishMavenJavaPublicationToGitHubPackagesRepository
+```
+
+GitHub Actions 배포:
+
+- `.github/workflows/publish-github-packages.yml` 이 추가되어 있습니다.
+- `workflow_dispatch`로 수동 실행할 수 있습니다.
+- `v*` 태그 푸시 예: `v1.0.0` 시 자동으로 GitHub Packages에 배포됩니다.
+- workflow에서는 `github.actor`와 기본 `secrets.GITHUB_TOKEN`을 사용하므로 별도 PAT secret 없이 동작하는 구성이 기본입니다.
+
+다른 프로젝트에서 사용:
+
+```groovy
+repositories {
+    maven {
+        url = uri("https://maven.pkg.github.com/whitenight209/crypto-kit")
+        credentials {
+            username = System.getenv("GITHUB_ACTOR")
+            password = System.getenv("GITHUB_TOKEN")
+        }
+    }
+    mavenCentral()
+}
+
+dependencies {
+    implementation 'com.chpark.crypto:crypto-kit:1.0.0'
+}
+```
+
 ## 의존성 추가
 
 로컬 jar를 빌드한 뒤 프로젝트에 추가합니다.

@@ -6,6 +6,19 @@ plugins {
 group = 'com.chpark.crypto'
 version = '1.0.0'
 
+def githubOwner = providers.gradleProperty('gpr.owner')
+    .orElse(providers.environmentVariable('GITHUB_OWNER'))
+    .orElse('whitenight209')
+def githubRepository = providers.gradleProperty('gpr.repo')
+    .orElse(providers.environmentVariable('GITHUB_REPOSITORY_NAME'))
+    .orElse(rootProject.name)
+def githubUsername = providers.gradleProperty('gpr.user')
+    .orElse(providers.environmentVariable('GITHUB_ACTOR'))
+    .orElse(providers.environmentVariable('GITHUB_USERNAME'))
+def githubToken = providers.gradleProperty('gpr.key')
+    .orElse(providers.environmentVariable('GITHUB_TOKEN'))
+    .orElse(providers.environmentVariable('GH_PACKAGES_TOKEN'))
+
 repositories {
     mavenCentral()
 }
@@ -20,6 +33,8 @@ dependencies {
 java {
     sourceCompatibility = JavaVersion.VERSION_17
     targetCompatibility = JavaVersion.VERSION_17
+    withSourcesJar()
+    withJavadocJar()
 }
 
 test {
@@ -30,10 +45,37 @@ publishing {
     publications {
         mavenJava(MavenPublication) {
             from components.java
+
+            pom {
+                name = rootProject.name
+                description = 'Thread-safe Java crypto library for PBKDF2 key derivation and AES-256-GCM encryption.'
+                url = "https://github.com/${githubOwner.get()}/${githubRepository.get()}"
+
+                licenses {
+                    license {
+                        name = 'MIT License'
+                        url = 'https://opensource.org/licenses/MIT'
+                    }
+                }
+
+                scm {
+                    connection = "scm:git:https://github.com/${githubOwner.get()}/${githubRepository.get()}.git"
+                    developerConnection = "scm:git:ssh://git@github.com/${githubOwner.get()}/${githubRepository.get()}.git"
+                    url = "https://github.com/${githubOwner.get()}/${githubRepository.get()}"
+                }
+            }
         }
     }
     repositories {
         mavenLocal()
+
+        maven {
+            name = 'GitHubPackages'
+            url = uri("https://maven.pkg.github.com/${githubOwner.get()}/${githubRepository.get()}")
+            credentials {
+                username = githubUsername.orNull
+                password = githubToken.orNull
+            }
+        }
     }
 }
-
