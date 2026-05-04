@@ -28,8 +28,8 @@ import java.util.Arrays;
  *
  * <p>Wire formats:
  * <ul>
- *   <li>Convenience path: {@code [salt (16)][nonce (12)][ciphertext + auth tag (16)]}
- *   <li>Fast path: {@code [nonce (12)][ciphertext + auth tag (16)]}
+ *   <li>Convenience path: {@code [magic header (5)][salt (16)][nonce (12)][ciphertext + auth tag (16)]}
+ *   <li>Fast path: {@code [magic header (5)][nonce (12)][ciphertext + auth tag (16)]}
  * </ul>
  *
  * <p>Use {@link #deriveKey(String, byte[])} to derive a key once and reuse it across
@@ -39,6 +39,7 @@ public class CryptoEngine {
 
     private static final String AES_GCM_ALGORITHM = "AES/GCM/NoPadding";
     private static final String PBKDF2_ALGORITHM = "PBKDF2WithHmacSHA256";
+    private static final byte[] MAGIC_HEADER = new byte[] {'C', 'K', 'I', 'T', 1};
 
     private final CryptoConfig config;
     private final SecureRandom random = new SecureRandom();
@@ -89,7 +90,7 @@ public class CryptoEngine {
 
     // -------------------------------------------------------------------------
     // Fast-path encryption  (pre-keyed, no PBKDF2)
-    // wire format: [nonce (12)][ciphertext + auth tag (16)]
+    // wire format: [magic header (5)][nonce (12)][ciphertext + auth tag (16)]
     // -------------------------------------------------------------------------
 
     /**
@@ -98,7 +99,7 @@ public class CryptoEngine {
      * <p>No key derivation is performed; the caller is responsible for supplying a
      * cryptographically strong key (e.g., via {@link #deriveKey}).
      *
-     * @return {@code [nonce (12 bytes)][ciphertext + GCM auth tag (16 bytes)]}
+     * @return {@code [magic header (5 bytes)][nonce (12 bytes)][ciphertext + GCM auth tag (16 bytes)]}
      */
     public byte[] encrypt(byte[] key, byte[] plaintext) throws CryptoException {
         if (key == null) throw new IllegalArgumentException("key must not be null");
@@ -109,15 +110,12 @@ public class CryptoEngine {
         byte[] nonce = generateRandom(config.nonceLength());
         byte[] ciphertextAndTag = gcmEncrypt(key, nonce, plaintext);
 
-        byte[] output = new byte[nonce.length + ciphertextAndTag.length];
-        System.arraycopy(nonce, 0, output, 0, nonce.length);
-        System.arraycopy(ciphertextAndTag, 0, output, nonce.length, ciphertextAndTag.length);
-        return output;
+        return buildFastPathOutput(nonce, ciphertextAndTag);
     }
 
     // -------------------------------------------------------------------------
     // Convenience-path encryption  (password-based, derives key inline)
-    // wire format: [salt (16)][nonce (12)][ciphertext + auth tag (16)]
+    // wire format: [magic header (5)][salt (16)][nonce (12)][ciphertext + auth tag (16)]
     // -------------------------------------------------------------------------
 
     /**
@@ -126,7 +124,7 @@ public class CryptoEngine {
      * <p>A random salt is generated, the AES key is derived via PBKDF2, and the
      * salt is prepended to the output blob so that decryption needs only the password.
      *
-     * @return {@code [salt (16 bytes)][nonce (12 bytes)][ciphertext + GCM auth tag (16 bytes)]}
+     * @return {@code [magic header (5 bytes)][salt (16 bytes)][nonce (12 bytes)][ciphertext + GCM auth tag (16 bytes)]}
      */
     public byte[] encrypt(String password, byte[] plaintext) throws CryptoException {
         if (password == null) throw new IllegalArgumentException("password must not be null");
@@ -134,22 +132,31 @@ public class CryptoEngine {
 
         byte[] salt = generateRandom(config.saltLength());
         byte[] key = deriveKey(password, salt);
-        byte[] nonceAndCiphertext = encrypt(key, plaintext);
+        try {
+            byte[] nonce = generateRandom(config.nonceLength());
+            byte[] ciphertextAndTag = gcmEncrypt(key, nonce, plaintext);
 
-        byte[] output = new byte[salt.length + nonceAndCiphertext.length];
-        System.arraycopy(salt, 0, output, 0, salt.length);
-        System.arraycopy(nonceAndCiphertext, 0, output, salt.length, nonceAndCiphertext.length);
-        Arrays.fill(key, (byte) 0);
-        return output;
+            byte[] output = new byte[MAGIC_HEADER.length + salt.length + nonce.length + ciphertextAndTag.length];
+            System.arraycopy(MAGIC_HEADER, 0, output, 0, MAGIC_HEADER.length);
+            System.arraycopy(salt, 0, output, MAGIC_HEADER.length, salt.length);
+            System.arraycopy(nonce, 0, output, MAGIC_HEADER.length + salt.length, nonce.length);
+            System.arraycopy(ciphertextAndTag, 0, output, MAGIC_HEADER.length + salt.length + nonce.length,
+                    ciphertextAndTag.length);
+            return output;
+        } finally {
+            Arrays.fill(key, (byte) 0);
+        }
     }
 
     // -------------------------------------------------------------------------
     // Fast-path decryption  (pre-keyed, no PBKDF2)
-    // expects: [nonce (12)][ciphertext + auth tag (16)]
+    // expects: [magic header (5)][nonce (12)][ciphertext + auth tag (16)]
     // -------------------------------------------------------------------------
 
     /**
      * Decrypts a blob produced by {@link #encrypt(byte[], byte[])}.
+     *
+     * <p>Headerless blobs produced by older crypto-kit versions are still accepted.
      *
      * @throws CryptoException         if the GCM authentication tag does not verify
      * @throws IllegalArgumentException if {@code ciphertext} is too short or inputs are null
@@ -160,23 +167,28 @@ public class CryptoEngine {
         if (key.length != config.keyLength() / 8)
             throw new IllegalArgumentException("key must be " + (config.keyLength() / 8) + " bytes");
 
+        boolean hasHeader = hasMagicHeader(ciphertext);
         int minLen = config.nonceLength() + config.tagLength() / 8 + 1;
+        if (hasHeader) minLen += MAGIC_HEADER.length;
         if (ciphertext.length < minLen)
             throw new IllegalArgumentException(
                     "ciphertext too short: need at least " + minLen + " bytes");
 
-        byte[] nonce = Arrays.copyOfRange(ciphertext, 0, config.nonceLength());
-        byte[] body = Arrays.copyOfRange(ciphertext, config.nonceLength(), ciphertext.length);
+        int nonceStart = hasHeader ? MAGIC_HEADER.length : 0;
+        byte[] nonce = Arrays.copyOfRange(ciphertext, nonceStart, nonceStart + config.nonceLength());
+        byte[] body = Arrays.copyOfRange(ciphertext, nonceStart + config.nonceLength(), ciphertext.length);
         return gcmDecrypt(key, nonce, body);
     }
 
     // -------------------------------------------------------------------------
     // Convenience-path decryption  (password-based, derives key inline)
-    // expects: [salt (16)][nonce (12)][ciphertext + auth tag (16)]
+    // expects: [magic header (5)][salt (16)][nonce (12)][ciphertext + auth tag (16)]
     // -------------------------------------------------------------------------
 
     /**
      * Decrypts a blob produced by {@link #encrypt(String, byte[])}.
+     *
+     * <p>Headerless blobs produced by older crypto-kit versions are still accepted.
      *
      * @throws CryptoException         if the GCM authentication tag does not verify
      *                                  (wrong password or tampered ciphertext)
@@ -186,20 +198,36 @@ public class CryptoEngine {
         if (password == null) throw new IllegalArgumentException("password must not be null");
         if (ciphertext == null) throw new IllegalArgumentException("ciphertext must not be null");
 
+        boolean hasHeader = hasMagicHeader(ciphertext);
         int minLen = config.saltLength() + config.nonceLength() + config.tagLength() / 8 + 1;
+        if (hasHeader) minLen += MAGIC_HEADER.length;
         if (ciphertext.length < minLen)
             throw new IllegalArgumentException(
                     "ciphertext too short: need at least " + minLen + " bytes");
 
-        byte[] salt = Arrays.copyOfRange(ciphertext, 0, config.saltLength());
-        byte[] nonceAndBody = Arrays.copyOfRange(ciphertext, config.saltLength(), ciphertext.length);
+        int saltStart = hasHeader ? MAGIC_HEADER.length : 0;
+        byte[] salt = Arrays.copyOfRange(ciphertext, saltStart, saltStart + config.saltLength());
+        int nonceStart = saltStart + config.saltLength();
+        byte[] nonce = Arrays.copyOfRange(ciphertext, nonceStart, nonceStart + config.nonceLength());
+        byte[] body = Arrays.copyOfRange(ciphertext, nonceStart + config.nonceLength(), ciphertext.length);
 
         byte[] key = deriveKey(password, salt);
         try {
-            return decrypt(key, nonceAndBody);
+            return gcmDecrypt(key, nonce, body);
         } finally {
             Arrays.fill(key, (byte) 0);
         }
+    }
+
+    /**
+     * Returns true when {@code data} starts with the crypto-kit encrypted-data header.
+     */
+    public static boolean hasMagicHeader(byte[] data) {
+        if (data == null || data.length < MAGIC_HEADER.length) return false;
+        for (int i = 0; i < MAGIC_HEADER.length; i++) {
+            if (data[i] != MAGIC_HEADER[i]) return false;
+        }
+        return true;
     }
 
     // -------------------------------------------------------------------------
@@ -239,6 +267,15 @@ public class CryptoEngine {
         byte[] bytes = new byte[length];
         random.nextBytes(bytes);
         return bytes;
+    }
+
+    private static byte[] buildFastPathOutput(byte[] nonce, byte[] ciphertextAndTag) {
+        byte[] output = new byte[MAGIC_HEADER.length + nonce.length + ciphertextAndTag.length];
+        System.arraycopy(MAGIC_HEADER, 0, output, 0, MAGIC_HEADER.length);
+        System.arraycopy(nonce, 0, output, MAGIC_HEADER.length, nonce.length);
+        System.arraycopy(ciphertextAndTag, 0, output, MAGIC_HEADER.length + nonce.length,
+                ciphertextAndTag.length);
+        return output;
     }
 
     private static Cipher createCipher() {

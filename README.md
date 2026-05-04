@@ -130,7 +130,10 @@ byte[] ciphertext = engine.encrypt("my-password", plaintext);
 byte[] decrypted  = engine.decrypt("my-password", ciphertext);
 ```
 
-**출력 포맷:** `[salt 16B][nonce 12B][ciphertext + GCM tag 16B]`
+**출력 포맷:** `[magic header 5B][salt 16B][nonce 12B][ciphertext + GCM tag 16B]`
+
+암호화된 데이터는 항상 `CKIT` + 버전 바이트로 시작합니다. `CryptoEngine.hasMagicHeader(bytes)`로 crypto-kit 암호화 데이터인지 확인할 수 있습니다.
+기존 버전에서 생성된 헤더 없는 데이터도 복호화할 수 있습니다.
 
 ---
 
@@ -157,7 +160,7 @@ byte[] cipher2 = engine.encrypt(key, data2);
 byte[] plain1 = engine.decrypt(key, cipher1);
 ```
 
-**출력 포맷:** `[nonce 12B][ciphertext + GCM tag 16B]`
+**출력 포맷:** `[magic header 5B][nonce 12B][ciphertext + GCM tag 16B]`
 
 ---
 

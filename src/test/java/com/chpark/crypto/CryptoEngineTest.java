@@ -54,7 +54,7 @@ class CryptoEngineTest {
 
         byte[] ciphertext = engine.encrypt(key, plaintext);
 
-        int expected = 12 + plaintext.length + 16; // nonce + plaintext + tag
+        int expected = 5 + 12 + plaintext.length + 16; // magic header + nonce + plaintext + tag
         assertEquals(expected, ciphertext.length);
     }
 
@@ -67,8 +67,18 @@ class CryptoEngineTest {
 
         byte[] ciphertext = engine.encrypt("password", plaintext);
 
-        int expected = 16 + 12 + plaintext.length + 16; // salt + nonce + plaintext + tag
+        int expected = 5 + 16 + 12 + plaintext.length + 16; // magic header + salt + nonce + plaintext + tag
         assertEquals(expected, ciphertext.length);
+    }
+
+    @Test
+    void encryptedOutput_hasMagicHeader() throws Exception {
+        byte[] key = engine.deriveKey("header-key", new byte[16]);
+
+        assertTrue(CryptoEngine.hasMagicHeader(engine.encrypt(key, "fast".getBytes())));
+        assertTrue(CryptoEngine.hasMagicHeader(engine.encrypt("password", "convenience".getBytes())));
+        assertFalse(CryptoEngine.hasMagicHeader("plain text".getBytes()));
+        assertFalse(CryptoEngine.hasMagicHeader(null));
     }
 
     // -------------------------------------------------------------------------
@@ -133,6 +143,25 @@ class CryptoEngineTest {
 
         assertThrows(IllegalArgumentException.class,
                 () -> engine.decrypt("password", tooShort));
+    }
+
+    @Test
+    void fastPath_legacyHeaderlessCiphertext_returnsOriginalPlaintext() throws Exception {
+        byte[] key = engine.deriveKey("legacy-key", new byte[16]);
+        byte[] plaintext = "legacy headerless fast path".getBytes();
+        byte[] ciphertext = engine.encrypt(key, plaintext);
+        byte[] legacyCiphertext = Arrays.copyOfRange(ciphertext, 5, ciphertext.length);
+
+        assertArrayEquals(plaintext, engine.decrypt(key, legacyCiphertext));
+    }
+
+    @Test
+    void conveniencePath_legacyHeaderlessCiphertext_returnsOriginalPlaintext() throws Exception {
+        byte[] plaintext = "legacy headerless convenience path".getBytes();
+        byte[] ciphertext = engine.encrypt("password", plaintext);
+        byte[] legacyCiphertext = Arrays.copyOfRange(ciphertext, 5, ciphertext.length);
+
+        assertArrayEquals(plaintext, engine.decrypt("password", legacyCiphertext));
     }
 
     // -------------------------------------------------------------------------
