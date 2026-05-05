@@ -48,7 +48,7 @@ GitHub Actions 배포:
 
 - `.github/workflows/publish-github-packages.yml` 이 추가되어 있습니다.
 - `workflow_dispatch`로 수동 실행할 수 있습니다.
-- `v*` 태그 푸시 예: `v1.0.0` 시 자동으로 GitHub Packages에 배포됩니다.
+- `v*` 태그 푸시 예: `v0.0.2` 시 자동으로 GitHub Packages에 배포됩니다.
 - workflow에서는 `github.actor`와 기본 `secrets.GITHUB_TOKEN`을 사용하므로 별도 PAT secret 없이 동작하는 구성이 기본입니다.
 
 다른 프로젝트에서 사용:
@@ -73,7 +73,7 @@ repositories {
 }
 
 dependencies {
-    implementation 'com.chpark.crypto:crypto-kit:1.0.0'
+    implementation 'com.chpark.crypto:crypto-kit:0.0.2'
 }
 ```
 
@@ -92,7 +92,7 @@ Maven CLI 예시:
 <dependency>
   <groupId>com.chpark.crypto</groupId>
   <artifactId>crypto-kit</artifactId>
-  <version>1.0.0</version>
+  <version>0.0.2</version>
 </dependency>
 ```
 
@@ -106,7 +106,7 @@ Maven CLI 예시:
 
 ```groovy
 // build.gradle
-implementation files('/path/to/crypto-kit/build/libs/crypto-kit-1.0.0.jar')
+implementation files('/path/to/crypto-kit/build/libs/crypto-kit-0.0.2.jar')
 ```
 
 ---

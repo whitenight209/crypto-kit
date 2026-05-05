@@ -4,7 +4,7 @@ plugins {
 }
 
 group = 'com.chpark.crypto'
-version = '1.0.0'
+version = '0.0.2'
 
 def githubOwner = providers.gradleProperty('gpr.owner')
     .orElse(providers.environmentVariable('GITHUB_OWNER'))
